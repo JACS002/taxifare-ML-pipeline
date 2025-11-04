@@ -1,0 +1,6 @@
+# --- Archivos sensibles ---
+.env
+*.env
+*password*
+*secret*
+__pycache__/

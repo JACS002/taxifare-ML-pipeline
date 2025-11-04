@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: dm_postgres
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${PG_DB}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d  # para ejecutar 00_init_schemas.sql al inicio
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  spark-notebook:
+    image: jupyter/all-spark-notebook:python-3.11
+    container_name: dm_spark_notebook
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+    mem_limit: 10g        # da espacio suficiente para 6g + overhead de sistema
+    cpus: 2
+    environment:
+      # Spark configs → 6 GB driver y executor
+      PYSPARK_SUBMIT_ARGS: >-
+        --packages org.postgresql:postgresql:42.7.3
+        --conf spark.driver.memory=6g
+        --conf spark.executor.memory=6g
+        --conf spark.executor.cores=2
+        pyspark-shell
+      JUPYTER_ENABLE_LAB: "yes"
+    command: >
+      start-notebook.sh
+      --NotebookApp.token=''
+      --NotebookApp.password=''
+      --ServerApp.token=''
+      --ServerApp.password=''
+
+  obt-builder:
+    build:
+      context: ./obt-builder
+      dockerfile: Dockerfile
+    container_name: dm_obt_builder
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./obt-builder:/app
+    # ejemplo de comando full; en README pondremos las variantes
+    command: >
+      python /app/build_obt.py
+      --mode ${OBT_MODE}
+      --year-start ${OBT_YEAR_START}
+      --year-end ${OBT_YEAR_END}
+      --services ${SERVICES}
+      --run-id ${RUN_ID}
+      --overwrite ${OBT_OVERWRITE}
+
+volumes:
+  pgdata:
